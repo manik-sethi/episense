@@ -1,1 +1,4 @@
 .env
+venv/
+X_interictal.pkl
+X_preictal.pkl
