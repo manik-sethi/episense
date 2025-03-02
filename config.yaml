@@ -1,0 +1,10 @@
+fs: 256
+window_size: 30
+overlap: 15
+f_low: 1
+f_high: 50
+subject_range: [1, 2, 3, 5, 8, 9, 10, 14, 16, 17, 20, 21, 23]
+PREICTAL_DURATION: 3600       # 60 minutes preictal window
+PREICTAL_OFFSET: 300          # 5 minutes offset before seizure onset
+INVALID_DURATION: 14400       # 4 hours discard window
+
