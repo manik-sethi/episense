@@ -8,8 +8,10 @@ from mne.io import concatenate_raws, read_raw_edf
 from mne import Epochs
 from mne.decoding import Scaler
 from scipy import signal
-from scipy.signal import butter, lfilter
+from scipy.signal import butter, lfilter, ShortTimeFFT, get_window
 from scipy.signal import ShortTimeFFT
+import torch
+import torch.fft
 
 mne.set_log_level('WARNING') 
 os.environ["OMP_NUM_THREADS"] = "1"  # Restrict OpenMP parallel messages
