@@ -78,8 +78,8 @@ scipy==1.15.0
 six==1.17.0
 stack-data==0.6.3
 sympy==1.13.1
-threadpoolctl==3.5.0
-torch==2.5.1
+threadpoolctl==3.5.0e
+torch==2.7.0
 torchvision==0.20.1
 tornado==6.4.2
 tqdm==4.67.1

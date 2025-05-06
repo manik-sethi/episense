@@ -40,7 +40,9 @@ class Pipeline:
     
     def read_fname(self):
         self.raw = read_raw_edf(self.fname, preload=True, verbose='ERROR')
-        self.raw.filter(self.f_low, self.f_high, fir_design="firwin", skip_by_annotation="edge")
+        self.raw.filter(l_freq=1.0, h_freq=None, fir_design="firwin", skip_by_annotation="edge")
+
+        self.raw.notch_filter(freqs=[60, 120], notch_widths=[2.0, 2.0])
         
         # Define the gold-standard channel order (only the channels you want to keep)
         gold_standard = [
@@ -102,42 +104,61 @@ class Pipeline:
         # Debug: print the final channel order
         # print("Final channel order:", self.raw.info['ch_names'])
 
-    def create_epochs(self):
-        epoch_list = []
-        labels = []
-        check_list = {}
-        max_time = self.raw.times[-1]  # Last valid time in the EEG recording
-        test = 0
+    def create_epochs(self, raw_channels, ranges_dict):
+        """
+        raw_channels: ndarray, shape (n_channels, n_samples)
+        ranges_dict: {'Preictal': [(start, end), ...], 'Interictal': [(start, end), ...]}
+                    times in seconds
+        """
+        fs         = self.fs
+        win_sec    = self.window_size      # e.g. 30
+        hop_sec    = win_sec * 0.25        # 25% stride → 75% overlap
+        win_samp   = int(win_sec * fs)
+        hop_samp   = int(hop_sec * fs)
 
-        # Debug: Print type and content of ranges_dict
-        # print("Type of ranges_dict:", type(self.ranges_dict))
-        # print("Content of ranges_dict:", self.ranges_dict)
+        pre_epochs = []
+        int_epochs = []
 
-        # Iterate over each label ("Preictal", "Interictal") and its list of intervals.
-        for sub_label, intervals in self.ranges_dict.items():
-            for start, end in intervals:
-                test += 1
-                if start >= max_time:
-                    # print(f"⚠️ Skipping range ({start}, {end}) - Start time exceeds max available time {max_time:.2f}s")
-                    continue
-                if end > max_time:
-                    # print(f"⚠️ Adjusting end time from {end} to max available time {max_time:.2f}s")
-                    end = max_time
-                # print(f"Creating epochs from {start} to {end}, Label: {sub_label}")
-                truncated_segment = self.raw.copy().crop(tmin=start, tmax=end)
-                n_channels = len(truncated_segment.info['ch_names'])
-                if n_channels != 22:
-                    print(f"Mismatch at epoch {test}: Expected 22 channels, got {n_channels}")
-                    print("Channels in this segment:", truncated_segment.info['ch_names'])
-                channels, times = truncated_segment.get_data(return_times=True)
-                epochs = self.apply_stft(channels)
-                epoch_list.append(epochs)
-                check_list[f'time{test}: {sub_label}'] = len(epochs[0][0])
-                t = epochs.shape[-1]
-                labels.extend([sub_label] * t)
-                # print(len(epoch_list), len(labels), sub_label, check_list)
-                print(f"Epoch {test} from file {os.path.basename(self.fname)} processed, label {sub_label}, {n_channels} channels")
-        return epoch_list, labels
+        # 1) Preictal: sliding windows
+        for (t0, t1) in ranges_dict['Preictal']:
+            start_i = int(t0 * fs)
+            end_i   = int(t1 * fs)
+            i       = start_i
+            while i + win_samp <= end_i:
+                segment = raw_channels[:, i : i + win_samp]  # shape (n_ch, win_samp)
+                pre_epochs.append(segment)
+                i += hop_samp
+
+        # 2) Interictal: one window per interval
+        for (t0, t1) in ranges_dict['Interictal']:
+            start_i = int(t0 * fs)
+            end_i   = int(t1 * fs)
+            if end_i - start_i >= win_samp:
+                # if longer than window, you might choose to slide here too,
+                # but paper uses one per interictal, so:
+                segment = raw_channels[:, start_i : start_i + win_samp]
+            else:
+                # pad or skip if too short
+                pad_width = win_samp - (end_i - start_i)
+                seg       = raw_channels[:, start_i:end_i]
+                segment   = np.pad(seg, ((0,0),(0,pad_width)), mode='constant', constant_values=0)
+            int_epochs.append(segment)
+
+        # 3) Balance classes by downsampling the larger set
+        n_pre = len(pre_epochs)
+        n_int = len(int_epochs)
+
+        if n_pre > n_int:
+            pre_epochs = random.sample(pre_epochs, n_int)
+        elif n_int > n_pre:
+            int_epochs = random.sample(int_epochs, n_pre)
+        # now n_pre == n_int
+
+        # 4) Stack and label
+        X = np.stack(pre_epochs + int_epochs)  # shape: (2*N, n_ch, win_samp)
+        y = np.array([1]*len(pre_epochs) + [0]*len(int_epochs))
+
+        return X, y
 
     def get_band_indices(self, frequencies, bands):
         indices = {}
@@ -148,34 +169,34 @@ class Pipeline:
     def apply_stft(self, channels):
         win = int(self.window_size * self.fs)
         hop = int(self.overlap * self.fs)
-        spectograms_list = []
+        spectograms = []
         SFT = ShortTimeFFT(win=np.hanning(win), hop=hop, fs=self.fs)
-        # bands = {
-        #     'delta': (0.5, 4),
-        #     'theta': (4, 8),
-        #     'alpha': (8, 13),
-        #     'beta': (13, 30),
-        #     'gamma': (30, 50)
-        # }
+
         for channel in channels:
             S = SFT.stft(channel)
             Sxx = 10 * np.log10(S + 1e-10)
-            frequencies = np.fft.rfftfreq(win, d=1/self.fs)
-            band_indices = self.get_band_indices(frequencies, bands)
-            band_powers = []
-            for band in bands.keys():
-                indices = band_indices[band]
-                band_power = np.mean(Sxx[indices], axis=0)
-                band_powers.append(band_power)
-            channel_specs = np.stack(band_powers)  # Shape: (5, time_bins)
-            spectograms_list.append(channel_specs)
-        # print("---SHAPE OF ONE RANGE EPOCHING---")
-        # print(np.shape(spectograms_list))
-        return np.stack(spectograms_list)
+            
+            spectograms.append(Sxx)
+        # resulting shape: (n_channels, freq_bins, time_bins)
+        return np.stack(spectograms)
 
     def run_pipeline(self):
+        # 1) load & filter EDF
         self.read_fname()
-        # print("read file")
-        combined_epochs, labels = self.create_epochs()
-        # print("created epochs")
-        return combined_epochs, labels
+
+        # 2) pull out the raw numpy array: shape (n_channels, n_samples)
+        raw_data = self.raw.get_data()
+
+        # 3) epoch into windows + balance classes
+        X_epochs, y = self.create_epochs(raw_data, self.ranges_dict)
+        #    X_epochs.shape == (n_epochs, n_ch, win_samp)
+
+        # 4) apply STFT to each epoch
+        specs = [ self.apply_stft(epoch) for epoch in X_epochs ]
+        #    each spec.shape == (n_ch, n_freq_bins, n_time_bins)
+
+        specs = np.stack(specs)  
+        #    specs.shape == (n_epochs, n_ch, n_freq_bins, n_time_bins)
+
+        return specs, y
+
