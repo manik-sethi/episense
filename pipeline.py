@@ -150,13 +150,13 @@ class Pipeline:
         hop = int(self.overlap * self.fs)
         spectograms_list = []
         SFT = ShortTimeFFT(win=np.hanning(win), hop=hop, fs=self.fs)
-        bands = {
-            'delta': (0.5, 4),
-            'theta': (4, 8),
-            'alpha': (8, 13),
-            'beta': (13, 30),
-            'gamma': (30, 50)
-        }
+        # bands = {
+        #     'delta': (0.5, 4),
+        #     'theta': (4, 8),
+        #     'alpha': (8, 13),
+        #     'beta': (13, 30),
+        #     'gamma': (30, 50)
+        # }
         for channel in channels:
             S = SFT.stft(channel)
             Sxx = 10 * np.log10(S + 1e-10)
