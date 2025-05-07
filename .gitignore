@@ -1,4 +1,17 @@
-.env
+# append the rules
+cat >> .gitignore <<'EOF'
+__pycache__/
+*.py[cod]
 venv/
-X_interictal.pkl
-X_preictal.pkl
+.env/
+*.env
+.ipynb_checkpoints/
+*.ipynb
+processed_data/
+*.pkl
+*.pth
+*.pt
+*.h5
+.DS_Store
+Thumbs.db
+EOF
