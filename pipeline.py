@@ -104,23 +104,19 @@ class Pipeline:
         for (t0, t1) in ranges_dict.get('Interictal', []):
             start = int(t0 * fs)
             end   = int(t1 * fs)
-            length = end - start
-            if length >= win_samp:
-                segment = raw_channels[:, start:start+win_samp]
-            else:
-                seg = raw_channels[:, start:end]
-                pad = win_samp - seg.shape[1]
-                segment = np.pad(seg, ((0,0),(0,pad)), 'constant')
-            int_epochs.append(segment)
+            i=start
+            while i + win_samp <= end:
+                int_epochs.append(raw_channels[:, i:i+win_samp])
+                i += win_samp 
 
         # Balance only if both classes exist
-        n_pre = len(pre_epochs)
-        n_int = len(int_epochs)
-        if n_pre > 0 and n_int > 0:
-            if n_pre > n_int:
-                pre_epochs = random.sample(pre_epochs, n_int)
-            elif n_int > n_pre:
-                int_epochs = random.sample(int_epochs, n_pre)
+        # n_pre = len(pre_epochs)
+        # n_int = len(int_epochs)
+        # if n_pre > 0 and n_int > 0:
+        #     if n_pre > n_int:
+        #         pre_epochs = random.sample(pre_epochs, n_int)
+        #     elif n_int > n_pre:
+        #         int_epochs = random.sample(int_epochs, n_pre)
 
         all_epochs = pre_epochs + int_epochs
         if not all_epochs:
